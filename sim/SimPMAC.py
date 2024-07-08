@@ -55,8 +55,8 @@ class SimulatedPmacAppGui(npyscreen.NPSAppManaged):
         values.append("Axis 8 : " + str(axes[8].readPosition()))
         return values
 
-    def create_pmac(self, port):
-        self.pmac_thread.create_pmac(port)
+    def create_pmac(self, port, plc_file):
+        self.pmac_thread.create_pmac(port, plc_file)
 
     def onStart(self):
         self.keypress_timeout_default = 100
@@ -64,13 +64,15 @@ class SimulatedPmacAppGui(npyscreen.NPSAppManaged):
         self.registerForm("MAIN_MENU", MainMenu())
 
 class SimulatedPmacAppNoGui():
-    def __init__(self, tcp_port):
+    def __init__(self, tcp_port, plc_file = 'defaultPLCs.py'):
         self.port = tcp_port
+        self.plc_file = plc_file
         self.pmac_thread = PmacThread()
 
     def run(self):
         print 'launching headless pmac simulator on port', self.port
-        self.pmac_thread.create_pmac(self.port)
+        print 'using plc definition file', self.plc_file
+        self.pmac_thread.create_pmac(self.port, self.plc_file)
         while True:
             threading._sleep(.1)
 
@@ -81,9 +83,9 @@ class PmacThread():
         self.simulator = None
         self.server_thread = None
 
-    def create_pmac(self, port):
+    def create_pmac(self, port, plc_file):
         # Create the simulator
-        self.simulator = PMACSimulator()
+        self.simulator = PMACSimulator(plc_file)
         # Start the simulator thread
         self.simulator_thread = threading.Thread(target=self.update)
         self.simulator_thread.daemon = True
@@ -110,9 +112,12 @@ class IntroForm(npyscreen.Form):
         self.add(npyscreen.TitleText, labelColor="LABELBOLD", name="Set the port number for the simulator", value="",
                  editable=False)
         self.port = self.add(npyscreen.TitleText, name="Port Number: ", value="1025")
+        self.add(npyscreen.TitleText, labelColor="LABELBOLD", name="Set the filename for the file containing the PLCs to be used by the simulator", value="",
+                 editable=False)
+        self.plc_file = self.add(npyscreen.TitleText, name="File: ", value="defaultPLCs.py")
 
     def afterEditing(self):
-        self.parentApp.create_pmac(int(self.port.value))
+        self.parentApp.create_pmac(int(self.port.value), self.plc_file.value)
         self.parentApp.setNextForm("MAIN_MENU")
 
 
@@ -383,9 +388,10 @@ class CoordinateSystem():
             return "000005000010000000"
 
 class PMACSimulator():
-    def __init__(self):
+    def __init__(self, plc_file):
         # print "init called"
         self.running = True
+        self.plc_file = plc_file
         self.ivars = {}
         self.pvars = [0] * 16000
         self.mvars = [0] * 16000
@@ -679,6 +685,7 @@ class PMACSimulator():
 	tokens = (
 	    'END',
 	    'ARROW',
+	    'ENABLEPLC',
 	    'WL',
 	    'CID',
 	    'LIST',
@@ -693,9 +700,7 @@ class PMACSimulator():
 	    'PQUERY',
 	    'AXIS',
 	    'JEQUAL',
-	    'JEQUALNEG',
-	    'JADDPOS',
-	    'JADDNEG',
+	    'JADD',
 	    'JSLASH',
 	    'JPOS',
 	    'JNEG',
@@ -742,6 +747,12 @@ class PMACSimulator():
 	        resp = resp + "Y" +'\r'
 	    #catch else?
 	
+	# Regex rule for ENABLE PLC
+	def t_ENABLEPLC(t):
+	    r'ENABLE\ PLC\d+'
+	    self.enable_plc(int(t.value[10:]))
+	    return t
+	
 	# Regex rule for WL:$
 	def t_WL(t):
 	    r'WL:$\d+'
@@ -766,15 +777,14 @@ class PMACSimulator():
 
 	# Regex rule for i number writing
 	def t_IWRITE(t):
-	    r'I\d+\=\d+'
-	    
+	    r'I\d+\=\d+|I\d+\=-\d+'
 	    index = (t.value).find('=')
 	    value = t.value[index + 1:]
 	    num = t.value[1:index]
 	    write_to_file(filename, ('\ni string is ', str(t.value), ',i value is ', str(value),',i variable is number ',str(num)))
 	    ivar = int(num)
-	    self.mvars[ivar] = float(value) #will scope kill this?
-	    if ivar > 99 and ivar < 901: #correct/necessary range?
+	    self.mvars[ivar] = float(value)
+	    if ivar > 99 and ivar < 901:
 	        axno = int(ivar / 100)
 	        varno = ivar - (100 * axno)
 	        self.axes[axno].writeIVar(varno, float(value))
@@ -809,7 +819,7 @@ class PMACSimulator():
 	
 	# Regex rule for m number writing
 	def t_MWRITE(t):
-	    r'M\d+\=\d+'
+	    r'M\d+\=\d+|M\d+\=-\d+'
 	    index = (t.value).find('=')
 	    value = t.value[index + 1:]
 	    num = t.value[1:index]
@@ -837,7 +847,7 @@ class PMACSimulator():
 
 	# Regex rule for p number writing
 	def t_PWRITE(t):
-	    r'P\d+\=\d+'
+	    r'P\d+\=\d+|P\d+\=-\d+'
 	    index = (t.value).find('=')
 	    value = t.value[index + 1:]
 	    num = t.value[1:index]
@@ -872,34 +882,18 @@ class PMACSimulator():
 
 	# Regex for J= terms aka pos demand
 	def t_JEQUAL(t):
-	    r'J\=\d+'
+	    r'J\=\d+|J\=-\d+'
 	    num = float(t.value[2::])
 	    write_to_file(filename, ('\nPos demand: ', str(num)))
 	    self.axes[self.caxis].move(num)
 	    return t
-	    
-	# Regex for J= terms aka pos demand
-	def t_JEQUALNEG(t):
-	    r'J\=\-\d+'
-	    num = float(t.value[3::])
-	    write_to_file(filename, ('\nPos demand: -', str(num)))
-	    self.axes[self.caxis].move(-num)
-	    return t
 	
 	# Regex for J^ positive terms (jog by a set amount from current position)
-	def t_JADDPOS(t):
-	    r'J\^\d+'
+	def t_JADD(t):
+	    r'J\^\d+|J\^-\d+'
 	    num = float(t.value[2::])
 	    write_to_file(filename, ('\nPos demand from current: ', str(num)))
 	    self.axes[self.caxis].move(self.axes[self.caxis].position + num)
-	    return t
-	
-	# Regex for J^ negative terms (jog by a set amount from current position)
-	def t_JADDNEG(t):
-	    r'J\^\-\d+'
-	    num = float(t.value[3::])
-	    write_to_file(filename, ('\nPos demand from current: ', str(-num)))
-	    self.axes[self.caxis].move(self.axes[self.caxis].position - num)
 	    return t
 
 	# Regex rule for /
@@ -1109,6 +1103,18 @@ class PMACSimulator():
     def read_position(self, address):
         return self.convertToDouble(self.memory[address])
 
+    def enable_plc(self, plc_num):
+    	try:
+    	    f = open(self.plc_file, 'r')
+    	    write_to_file(filename, '\nOpening %r'%(self.plc_file))
+	except:
+    	    logging.debug('Could not open chosen PLC file, reverting to default file')
+    	    write_to_file('\nCould not open chosen PLC file, reverting to default file')
+    	    f = open('defaultPLCs.py', 'r')
+	finally:
+    	    exec(f.read())
+    	    f.close()
+    
     def parse_memory_write(self, word):
         address = 0
         # Split by commas
@@ -1193,6 +1199,8 @@ if __name__ == "__main__":
     # no parameter means run interactively
     if len(sys.argv) == 2:
         app = SimulatedPmacAppNoGui(sys.argv[1])
+    elif len(sys.argv) == 3:
+    	app = SimulatedPmacAppNoGui(sys.argv[1], sys.argv[2])
     else:
         app = SimulatedPmacAppGui()
 
