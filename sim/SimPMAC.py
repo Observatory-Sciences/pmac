@@ -202,11 +202,16 @@ class PMACAxis():
 
     def getStatus(self):
         #return "88000080040" + self.done
-        first_char_binary = 1*1000 + self.lolimhit*100 + self.hilimhit*10 + 0*1
-        first_char_decimal = int(str(first_char_binary),2)
-        first_char_hex = hex(first_char_decimal)
-        first_char = str(first_char_hex[-1].upper())
-        return first_char + "8000001840" + self.done
+        #first_char_binary = 1*1000 + self.lolimhit*100 + self.hilimhit*10 + 0*1
+        #first_char_binary = 0b1001 | self.lolimhit<<2 | self.hilimhit<<1
+        #first_char_decimal = int(str(first_char_binary),2)
+        #first_char_hex = hex(first_char_decimal)
+        #first_char_hex = hex(first_char_binary)
+        status_hex = 0x9880000018400 | self.lolimhit<<46 | self.hilimhit<<45 | self.done<<0
+        #status_hex = 0x9080000018400 | self.lolimhit<<46 | self.hilimhit<<45 | self.done<<0 | AmplifierEnabled<<43 (need to implement)
+        #status_str = str(status_hex[-1].upper())
+        return '{:02X}'.format(status_hex)
+        #return first_char + "8000001840" + self.done
         #return "88000001840" + self.done
 
     def writeIVar(self, no, value):
@@ -248,13 +253,16 @@ class PMACAxis():
             self.hilimhit = False
         if self.position < (self.dmd_position - self.velocity):
             self.position = self.position + self.velocity
-            self.done = "0"
+            #self.done = "0"
+            self.done = 0
         elif self.position > (self.dmd_position + self.velocity):
             self.position = self.position - self.velocity
-            self.done = "0"
+            #self.done = "0"
+            self.done = 0
         else:
             self.position = self.dmd_position
-            self.done = "1"
+            #self.done = "1"
+            self.done = 1
 
 class CoordinateSystem():
     def __init__(self, controller):
