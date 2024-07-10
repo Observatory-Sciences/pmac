@@ -196,7 +196,8 @@ class PMACAxis():
         self.position = 0.0
         self.dmd_position = 0.0
         self.velocity = 20
-        self.done = "1"
+        self.done = 1
+        self.amp_enabled = 0
         self.lolimhit = False
         self.hilimhit = False
 
@@ -207,8 +208,8 @@ class PMACAxis():
         #first_char_decimal = int(str(first_char_binary),2)
         #first_char_hex = hex(first_char_decimal)
         #first_char_hex = hex(first_char_binary)
-        status_hex = 0x9880000018400 | self.lolimhit<<46 | self.hilimhit<<45 | self.done<<0
-        #status_hex = 0x9080000018400 | self.lolimhit<<46 | self.hilimhit<<45 | self.done<<0 | AmplifierEnabled<<43 (need to implement)
+        #status_hex = 0x9880000018400 | self.lolimhit<<46 | self.hilimhit<<45 | self.done<<0
+        status_hex = 0x800000018400 | self.amp_enabled<<43 | self.lolimhit<<46 | self.hilimhit<<45 | self.done<<0
         #status_str = str(status_hex[-1].upper())
         return '{:02X}'.format(status_hex)
         #return first_char + "8000001840" + self.done
@@ -226,6 +227,7 @@ class PMACAxis():
     def move(self, position):
         lolim = self.ivars[14]
         hilim = self.ivars[13]
+        self.amp_enabled = 1
         if position > lolim and position < hilim:
             self.dmd_position = position
         if position <= lolim:
@@ -234,6 +236,7 @@ class PMACAxis():
             self.dmd_position = hilim
 
     def stop(self):
+        self.amp_enabled = 1
         self.dmd_position = self.position
 
     def update(self):
@@ -253,15 +256,12 @@ class PMACAxis():
             self.hilimhit = False
         if self.position < (self.dmd_position - self.velocity):
             self.position = self.position + self.velocity
-            #self.done = "0"
             self.done = 0
         elif self.position > (self.dmd_position + self.velocity):
             self.position = self.position - self.velocity
-            #self.done = "0"
             self.done = 0
         else:
             self.position = self.dmd_position
-            #self.done = "1"
             self.done = 1
 
 class CoordinateSystem():
@@ -724,6 +724,7 @@ class PMACSimulator():
 	    'V',
 	    'F',
 	    'Q',
+	    'K',
 	    'NUMBER',
 	    'LETTERSTRING',
 	    'SYMBOL',
@@ -1026,6 +1027,14 @@ class PMACSimulator():
 	    global resp
 	    resp = resp + '0' +'\r'
 	    write_to_file(filename, "\nresp = resp + '0' +\'\\r\'")
+	    return t
+
+	# Regex for K (Kill)
+	def t_K(t):
+	    r'K'
+	    self.axes[self.caxis].stop()
+	    self.axes[self.caxis].amp_enabled = 0
+	    write_to_file(filename, ('\nKilling axis ', str(self.caxis)))
 	    return t
 
 	# General catch-all regex rules, should go after main specific rules:
